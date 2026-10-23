@@ -5,9 +5,11 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock3,
+  CreditCard,
   MapPin,
   Minus,
   Plus,
+  QrCode,
   ShoppingBag,
   Trash2,
   UtensilsCrossed,
@@ -18,6 +20,10 @@ const canteens = {
   second: {
     name: "学生食堂（2階）",
     shortName: "2階",
+    businessHours: [
+      { label: "昼営業", start: "11:00", end: "14:00" },
+      { label: "夜営業", start: "15:00", end: "20:00" },
+    ],
     menu: [
       { id: "karaage", name: "から揚げ定食", price: 580, wait: 8, stock: 20, emoji: "🍗", description: "ごはん・味噌汁付き" },
       { id: "curry", name: "ビーフカレー", price: 470, wait: 4, stock: 22, emoji: "🍛", description: "じっくり煮込んだ定番カレー" },
@@ -30,6 +36,7 @@ const canteens = {
   mezzanine: {
     name: "学生食堂（M2階）",
     shortName: "M2階",
+    businessHours: [{ label: "昼営業", start: "11:00", end: "14:00" }],
     menu: [
       { id: "shoyu-ramen", name: "醤油ラーメン", price: 480, wait: 7, stock: 16, emoji: "🍜", description: "あっさり鶏ガラスープ" },
       { id: "kitsune-udon", name: "きつねうどん", price: 420, wait: 5, stock: 18, emoji: "🍜", description: "ふっくらお揚げのうどん" },
@@ -41,7 +48,28 @@ const canteens = {
   },
 };
 
-const pickupTimes = ["11:30", "11:45", "12:00", "12:15", "12:30", "12:45", "13:00", "13:15", "13:30", "13:45", "14:00"];
+const paymentMethods = [
+  { id: "code", label: "コード決済", Icon: QrCode },
+  { id: "card", label: "カード", Icon: CreditCard },
+];
+
+function getPickupTimes(businessHours) {
+  return businessHours.flatMap(({ label, start, end }) => {
+    const [startHour, startMinute] = start.split(":").map(Number);
+    const [endHour, endMinute] = end.split(":").map(Number);
+    const startTime = startHour * 60 + startMinute;
+    const endTime = endHour * 60 + endMinute;
+    const times = [];
+
+    for (let minutes = startTime; minutes < endTime; minutes += 15) {
+      const hour = Math.floor(minutes / 60).toString().padStart(2, "0");
+      const minute = (minutes % 60).toString().padStart(2, "0");
+      times.push({ value: `${hour}:${minute}`, label });
+    }
+
+    return times;
+  });
+}
 
 function formatDate(date) {
   return new Intl.DateTimeFormat("ja-JP", {
@@ -64,10 +92,13 @@ export default function App() {
   const [tab, setTab] = useState("home");
   const [order, setOrder] = useState(null);
   const [notice, setNotice] = useState("");
+  const [checkoutError, setCheckoutError] = useState("");
   const [showCart, setShowCart] = useState(false);
   const [pickupTime, setPickupTime] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("");
   const noticeTimer = useRef(null);
   const canteen = canteens[canteenId];
+  const availablePickupTimes = getPickupTimes(canteen.businessHours);
   const quantity = cart.reduce((sum, item) => sum + item.quantity, 0);
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const maxWait = cart.length ? Math.max(...cart.map((item) => item.wait)) : 0;
@@ -87,6 +118,7 @@ export default function App() {
       return;
     }
     setCanteenId(id);
+    setPickupTime("");
   };
 
   const add = (item) => {
@@ -123,7 +155,15 @@ export default function App() {
 
   const checkout = () => {
     if (!cart.length) return notify("メニューを選んでください");
-    if (!pickupTime) return notify("受取時間を選んでください");
+    if (!pickupTime) {
+      setCheckoutError("受取時間を選択してください");
+      return;
+    }
+    if (!paymentMethod) {
+      setCheckoutError("支払方法を選択してください");
+      return;
+    }
+    setCheckoutError("");
 
     setOrder({
       number: `CQ-${Math.floor(100 + Math.random() * 900)}`,
@@ -131,12 +171,14 @@ export default function App() {
       items: cart,
       total,
       pickupTime,
+      paymentMethod: paymentMethods.find((method) => method.id === paymentMethod).label,
       wait: maxWait,
     });
     setShowCart(false);
     setTab("order");
     setCart([]);
     setPickupTime("");
+    setPaymentMethod("");
   };
 
   return (
@@ -147,7 +189,7 @@ export default function App() {
             <p className="eyebrow">学食モバイルオーダー</p>
             <h1>Campus Quick</h1>
           </div>
-          <button className="icon-button" onClick={() => setShowCart(true)} aria-label="カートを開く">
+          <button className="icon-button" onClick={() => { setNotice(""); setCheckoutError(""); setShowCart(true); }} aria-label="カートを開く">
             <ShoppingBag size={21} />
             {quantity > 0 && <span className="badge">{quantity}</span>}
           </button>
@@ -204,12 +246,16 @@ export default function App() {
               <Card className="date-card">
                 <div className="row between">
                   <div>
-                    <p className="muted small">本日の営業</p>
+                    <p className="muted small">営業時間（月〜金）</p>
                     <h2>{formatDate(today)}</h2>
                   </div>
-                  <span className={`status ${isOpen ? "green-soft" : "rose-soft"}`}>
-                    {isOpen ? "11:00〜15:00" : "本日は休業"}
-                  </span>
+                  <div className="business-hours">
+                    {isOpen ? canteen.businessHours.map((hours) => (
+                      <span className="status green-soft" key={hours.label}>
+                        {hours.label} {hours.start}〜{hours.end}
+                      </span>
+                    )) : <span className="status rose-soft">本日は休業</span>}
+                  </div>
                 </div>
               </Card>
 
@@ -220,26 +266,31 @@ export default function App() {
                 </div>
                 {isOpen ? (
                   <div className="menu-grid">
-                    {canteen.menu.map((menu) => (
-                      <Card className="menu-card" key={menu.id}>
-                        <div className="food-visual" aria-hidden="true">{menu.emoji}</div>
-                        <h3>{menu.name}</h3>
-                        <p className="menu-description">{menu.description}</p>
-                        <p className="muted small inline"><Clock3 size={12} />約{menu.wait}分・残り{menu.stock}</p>
-                        <div className="row between menu-bottom">
-                          <strong>¥{menu.price.toLocaleString("ja-JP")}</strong>
-                          <button
-                            className="add-button"
-                            disabled={!isOpen}
-                            onClick={() => add(menu)}
-                            aria-label={`${menu.name}をカートに追加`}
-                            type="button"
-                          >
-                            <Plus size={19} />
-                          </button>
-                        </div>
-                      </Card>
-                    ))}
+                    {canteen.menu.map((menu) => {
+                      const menuQuantity = cart.find((item) => item.id === menu.id)?.quantity ?? 0;
+                      return (
+                        <Card className="menu-card" key={menu.id}>
+                          <div className="food-visual" aria-hidden="true">{menu.emoji}</div>
+                          <h3>{menu.name}</h3>
+                          <p className="menu-description">{menu.description}</p>
+                          <p className="muted small inline"><Clock3 size={12} />約{menu.wait}分・残り{menu.stock}</p>
+                          <div className="row between menu-bottom">
+                            <strong>¥{menu.price.toLocaleString("ja-JP")}</strong>
+                            <motion.button
+                              className="add-button"
+                              disabled={!isOpen}
+                              onClick={() => add(menu)}
+                              aria-label={`${menu.name}をカートに追加${menuQuantity ? `（現在${menuQuantity}個）` : ""}`}
+                              whileTap={{ scale: 0.88 }}
+                              type="button"
+                            >
+                              <Plus size={19} />
+                              {menuQuantity > 0 && <span className="add-count">{menuQuantity}</span>}
+                            </motion.button>
+                          </div>
+                        </Card>
+                      );
+                    })}
                   </div>
                 ) : (
                   <Card><p className="empty-message">土曜日・日曜日は休業です。</p></Card>
@@ -264,6 +315,7 @@ export default function App() {
                     <div className="row between order-meta"><span>受取場所</span><b>{order.canteenName}</b></div>
                     <div className="row between order-meta"><span>受取予定</span><b>{order.pickupTime}</b></div>
                     <div className="row between order-meta"><span>調理目安</span><b>約{order.wait}分</b></div>
+                    <div className="row between order-meta"><span>支払方法</span><b>{order.paymentMethod}</b></div>
                   </Card>
                   <Card>
                     <h3 className="inline"><ShoppingBag size={18} />注文内容</h3>
@@ -324,7 +376,7 @@ export default function App() {
             >
               <motion.div
                 className="sheet"
-                initial={{ y: "100%" }}
+                initial={{ y: 0 }}
                 animate={{ y: 0 }}
                 exit={{ y: "100%" }}
                 onClick={(event) => event.stopPropagation()}
@@ -332,43 +384,82 @@ export default function App() {
                 aria-modal="true"
                 aria-labelledby="cart-title"
               >
-                <div className="row between">
+                <div className="sheet-header row between">
                   <div>
-                    <h2 id="cart-title">注文内容</h2>
+                    <h2 id="cart-title">注文内容の確認</h2>
                     <p className="cart-canteen">{canteen.name}</p>
                   </div>
                   <button className="plain" onClick={() => setShowCart(false)} aria-label="カートを閉じる" type="button"><X /></button>
                 </div>
-                {cart.length === 0 ? (
-                  <p className="empty-message">商品がありません</p>
-                ) : (
-                  <>
-                    <div className="cart-list">
-                      {cart.map((item) => (
-                        <div className="cart-item" key={item.id}>
-                          <div><b>{item.emoji} {item.name}</b><p>¥{item.price.toLocaleString("ja-JP")} × {item.quantity}</p></div>
-                          <div className="quantity-control">
-                            <button onClick={() => changeQuantity(item.id, -1)} aria-label={`${item.name}を1つ減らす`} type="button"><Minus size={15} /></button>
-                            <span>{item.quantity}</span>
-                            <button onClick={() => add(item)} aria-label={`${item.name}を1つ増やす`} type="button"><Plus size={15} /></button>
-                            <button className="trash" onClick={() => removeItem(item.id)} aria-label={`${item.name}を削除`} type="button"><Trash2 size={16} /></button>
-                          </div>
+                <div className="sheet-content">
+                  {cart.length === 0 ? (
+                    <p className="empty-message">商品がありません</p>
+                  ) : (
+                    <>
+                      <section className="confirmation-section" aria-label="注文する商品">
+                        <h3>注文する商品 <span>{quantity}点</span></h3>
+                        <div className="cart-list">
+                          {cart.map((item) => (
+                            <div className="cart-item" key={item.id}>
+                              <div className="cart-item-info">
+                                <b>{item.emoji} {item.name}</b>
+                                <p>¥{item.price.toLocaleString("ja-JP")} × {item.quantity}</p>
+                              </div>
+                              <strong className="cart-item-subtotal">¥{(item.price * item.quantity).toLocaleString("ja-JP")}</strong>
+                              <div className="quantity-control">
+                                <button onClick={() => changeQuantity(item.id, -1)} aria-label={`${item.name}を1つ減らす`} type="button"><Minus size={15} /></button>
+                                <span>{item.quantity}</span>
+                                <button onClick={() => add(item)} aria-label={`${item.name}を1つ増やす`} type="button"><Plus size={15} /></button>
+                                <button className="trash" onClick={() => removeItem(item.id)} aria-label={`${item.name}を削除`} type="button"><Trash2 size={16} /></button>
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                    <label className="pickup-label">受取時間
-                      <select value={pickupTime} onChange={(event) => setPickupTime(event.target.value)}>
-                        <option value="">選択してください</option>
-                        {pickupTimes.map((time) => <option key={time} value={time}>{time}</option>)}
-                      </select>
-                    </label>
+                      </section>
+                      <section className="confirmation-section">
+                        <h3>受取時間</h3>
+                        <p className="section-hint">営業中の時間から選択してください（15分ごと）</p>
+                        <label className="pickup-label">
+                          <span className="visually-hidden">受取時間を選択</span>
+                          <select value={pickupTime} onChange={(event) => { setPickupTime(event.target.value); setCheckoutError(""); }}>
+                            <option value="">時間を選択してください</option>
+                            {availablePickupTimes.map(({ value, label }) => (
+                              <option key={value} value={value}>{value}（{label}）</option>
+                            ))}
+                          </select>
+                        </label>
+                      </section>
+                      <fieldset className="confirmation-section payment-options">
+                        <legend>支払方法</legend>
+                        <div className="payment-method-list">
+                          {paymentMethods.map(({ id, label, Icon }) => (
+                            <label className={`payment-method${paymentMethod === id ? " selected" : ""}`} key={id}>
+                              <input
+                                type="radio"
+                                name="payment-method"
+                                value={id}
+                                checked={paymentMethod === id}
+                                onChange={() => { setPaymentMethod(id); setCheckoutError(""); }}
+                              />
+                              <Icon size={20} />
+                              <span>{label}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </fieldset>
+                    </>
+                  )}
+                </div>
+                {cart.length > 0 && (
+                  <div className="sheet-footer">
                     <div className="row between total-line">
-                      <span>合計</span>
+                      <span>お支払い合計</span>
                       <strong>¥{total.toLocaleString("ja-JP")}</strong>
                     </div>
-                    <button className="primary" onClick={checkout} type="button">注文内容を確定する<ChevronRight size={18} /></button>
-                    <p className="hint">プロトタイプのため、実際の決済・注文送信は行われません。</p>
-                  </>
+                    {checkoutError && <p className="checkout-error" role="alert">{checkoutError}</p>}
+                    <button className="primary" onClick={checkout} type="button">内容を確認して注文する<ChevronRight size={18} /></button>
+                    <p className="hint">デモのため、決済・注文送信は行われません。</p>
+                  </div>
                 )}
               </motion.div>
             </motion.div>
